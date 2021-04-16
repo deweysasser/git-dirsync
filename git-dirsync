@@ -1,0 +1,73 @@
+#!/bin/bash
+
+# Purpose:  commit files in ~/Documents after they've been idle for an hour, accumulating into a daily commit (unless something else has been pushed since)
+
+shopt -s nullglob
+set -ueo pipefail
+
+$regex="\.(mm|writemap|txt|md|png|jpeg|jpg)"
+tmp=/tmp/sync-$$
+trap 'rm -rf $tmp' 0
+mkdir -p $tmp
+
+current_branch() {
+    git symbolic-ref --short HEAD
+}
+
+
+origin() {
+    git config branch.$1.remote
+}
+
+remote_branch() {
+    git config branch.$1.merge | cut -d / -f 3-
+}
+
+remote() {
+	echo "$(origin $1)/$(remote_branch $1)"
+}
+
+has_changes() {
+	if [ -n "$(git log HEAD..$1)" ] ; then
+	 	return 0
+	else
+		return 1
+	fi
+}
+
+can_merge() {
+	base=$(git merge-base FETCH_HEAD HEAD)
+	if [ -n "$(git merge-tree $base HEAD FETCH_HEAD | grep '>>' ) " ] ; then
+		return 1
+	fi
+	return 0
+}
+
+
+merge_remote() {
+    branch=$(current_branch)
+    remote=$(remote $branch)
+
+    git fetch
+
+    if has_changes $remote; then
+        if can_merge $remote; then
+            git merge $remote
+        fi
+    fi
+}
+
+
+checkpoint() {
+    git symbolic-ref HEAD ref/heads/checkpoint
+    git reset
+
+    git ls-files -om --exclude-standard | egrep "$regex"  > $tmp/files
+    if [ -s $tmp/files ] ; then
+        # we have files to comit
+        cat /tmp/files | while read  FILE; do
+            git add "$FILE"
+        done
+
+        git commit -m "Checkpoint"
+    fi
