@@ -46,3 +46,5 @@ but don't muck with the main branch.  `flush` command should fail
 ## TODO:
 
 * if the fetch succeeds, should we get rid of the checkpoint branch?  Probably
+
+* Specify the fileglob in a repo setting `dirsync.fileglob`

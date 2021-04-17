@@ -19,9 +19,18 @@ cmd_pull() {
 
 # CMD: checkpoint -- run a temporary checkpoint of local files
 cmd_checkpoint() {
-  pull_changes
-  create_checkpoint_commit
-#  if amend_checkpoint ; then
+  if pull_changes; then
+    pull_worked=true
+  else
+    pull_worked=false
+  fi
+
+  create_branch_checkpoint
+
+  if $pull_worked ; then
+    create_main_checkpoint
+  fi
+#  if create_main_checkpoint ; then
 #    force_push
 #  else
 #    create_checkpoint
@@ -44,6 +53,26 @@ EOF
 awk -F : '/^# *CMD: /{print $2}' "$0"
 }
 
+# amend the current main branch checkpoint commit
+create_main_checkpoint() {
+  targetCommitMessage="Checkpoint on $(hostname) for $(date +%Y-%m-%d)"
+  currentCommitMessage="$(git log -1 --format=%s)"
+
+  add_files
+
+  if [ -z "$(git status --porcelain)" ] ; then
+    # nothing to commit
+    return 0
+  fi
+
+  if [ "$targetCommitMessage" == "$currentCommitMessage" ] ; then
+    git commit --amend --no-edit
+    git push -f
+  else
+    git commit -m "$targetCommitMessage"
+    git push
+  fi
+}
 
 # Pull changes from the upstream.
 # If there's a conflict, exit.  If there's no conflict, merge it in and allow git to merge or ff-merge as necessary.
@@ -69,21 +98,29 @@ is_merge_conflict() {
   grep -s "<<" "$1"
 }
 
-# Create a checkpoint commit on the checkpoint branch
-create_checkpoint_commit() {
-  currentCommit=$(git rev-parse HEAD)
-  currentBranch=$(git symbolic-ref --short HEAD)
-  checkpointBranch="checkpoint/$(hostname)"
-
-  # Move onto the checkpoint branch
-  git symbolic-ref HEAD "refs/heads/$checkpointBranch"
-
+# add all files which have changed or are "other" and match the right thing
+add_files() {
   # Look for all the files -- which might have spaces in their names
   git ls-files -om --exclude-standard | while read file; do
     git add "$file"
   done
+}
 
-  git commit -m "Checkpoint at $(date +%Y-%m-%d)"
+# Create a checkpoint commit on the checkpoint branch
+create_branch_checkpoint() {
+  currentCommit=$(git rev-parse HEAD)
+  currentBranch=$(git symbolic-ref --short HEAD)
+  checkpointBranch="checkpoint/$currentBranch/$(hostname)"
+
+  # Move onto the checkpoint branch
+  git symbolic-ref HEAD "refs/heads/$checkpointBranch"
+  git reset
+
+  add_files
+
+  git commit -m "Checkpoint at $(date '+%Y-%m-%d %H:%M')" || true
+
+  git push origin "$checkpointBranch"
 
   # Now recover the original branch -- this should not change the working tree
   git symbolic-ref HEAD "refs/heads/$currentBranch"
