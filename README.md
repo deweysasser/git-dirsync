@@ -28,8 +28,9 @@ locked).
 On every checkpoint, first we pull any changes from the remote repo and (if they do not conflict),
 merge them in.
 
-Then we create a checkpoint commit on branch `checkpoint/$(hostname)` and push it, then we create
-find newly changed files and (if we're working on a checkpoint commit), amend it and force push it.
+Then we create a checkpoint commit on branch `checkpoint/$mainBranch/$(hostname)` with all updates
+and push it, then we find newly changed files and either create or amend a checkpoint commit and
+force push it.
 
 If the checkpoint commit is not the current HEAD, we create a new checkpoint commit and push that.
 
@@ -38,13 +39,13 @@ If the checkpoint commit is not the current HEAD, we create a new checkpoint com
 On flush, we take the latest checkpoint commit, amend it to a daily commit, and force push it,
 overwriting the checkpoint commit.
 
+We also delete the checkpoint branch.
+
 ### Conflicts
 
-Oh boy.  For now, just refuse to pull in changes.  Keep checkpointing to the checkpoint branches 
-but don't muck with the main branch.  `flush` command should fail
+Oh boy. For now, just refuse to pull in changes. Keep checkpointing to the checkpoint branches but
+don't muck with the main branch.  
 
 ## TODO:
 
-* if the fetch succeeds, should we get rid of the checkpoint branch?  Probably
-
-* Specify the fileglob in a repo setting `dirsync.fileglob`
+* Specify a regular expression for files in a repo setting `dirsync.file-regexp`

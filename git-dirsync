@@ -30,17 +30,55 @@ cmd_checkpoint() {
   if $pull_worked ; then
     create_main_checkpoint
   fi
-#  if create_main_checkpoint ; then
-#    force_push
-#  else
-#    create_checkpoint
-#    push
-#  fi
 }
 
 # CMD: flush -- flush today's checkpoints into a daily commit
 cmd_flush() {
-  not_implemented
+  if pull_changes; then
+    pull_worked=true
+  else
+    pull_worked=false
+  fi
+
+  if $pull_worked ; then
+    amend_checkpoint_commit
+    delete_checkpoint_branch
+  fi
+}
+
+# Delete the checkpoint local and remote branches
+delete_checkpoint_branch() {
+  currentCommit=$(git rev-parse HEAD)
+  currentBranch=$(git symbolic-ref --short HEAD)
+  checkpointBranch="checkpoint/$currentBranch/$(hostname)"
+  origin="$(git config "branch.$currentBranch.remote")"
+
+  if [ -n "$(git branch -l "$checkpointBranch")" ] ; then
+    git branch -D "$checkpointBranch"
+  fi
+
+  if [ -n "$(git ls-remote --heads "$origin" "$checkpointBranch")" ] ; then
+    git push -d "$origin" "$checkpointBranch"
+  fi
+}
+
+# amend the current checkpoint commit if it exists
+amend_checkpoint_commit() {
+  targetCommitMessage="Checkpoint on $(hostname) for $(date +%Y-%m-%d)"
+  currentCommitMessage="$(git log -1 --format=%s)"
+  newCommitMessage="Periodic commit on $(date '+%Y-%m-%d %H:%M:%S').
+
+Committed from $(hostname)."
+
+  add_files
+
+  if [ "$targetCommitMessage" == "$currentCommitMessage" ] ; then
+    git commit --amend -m "$newCommitMessage"
+    git push -f
+  elif [ -n "$(git status --porcelain)" ] ; then
+    git commit -m "$newCommitMessage"
+    git push
+  fi
 }
 
 # CMD: help -- print this message
@@ -81,7 +119,7 @@ pull_changes() {
   base="$(git merge-base HEAD FETCH_HEAD)"
   current="$(git rev-parse HEAD)"
 
-    if [ $current != $base ] ; then
+    if [ "$current" != "$base" ] ; then
       git merge-tree "$base" HEAD FETCH_HEAD > $tmp/merge-result.txt
 
     if is_merge_conflict $tmp/merge-result.txt ; then
@@ -100,9 +138,20 @@ is_merge_conflict() {
 
 # add all files which have changed or are "other" and match the right thing
 add_files() {
+  regex="$(git config dirsync.file-regex || true)"
   # Look for all the files -- which might have spaces in their names
-  git ls-files -om --exclude-standard | while read file; do
-    git add "$file"
+  git ls-files -om --exclude-standard | while read -r file; do
+    if [ -z "$regex" ] ; then
+     git add "$file"
+    else
+      for r in $regex ; do
+        # shellcheck disable=SC2053
+        if [[ "$file" =~ $r ]] ;then
+               git add "$file"
+               break
+        fi
+      done
+    fi
   done
 }
 
@@ -111,16 +160,23 @@ create_branch_checkpoint() {
   currentCommit=$(git rev-parse HEAD)
   currentBranch=$(git symbolic-ref --short HEAD)
   checkpointBranch="checkpoint/$currentBranch/$(hostname)"
+  origin="$(git config "branch.$currentBranch.remote")"
 
-  # Move onto the checkpoint branch
-  git symbolic-ref HEAD "refs/heads/$checkpointBranch"
-  git reset
+
+  if [ -n "$(git branch -l "$checkpointBranch")" ] ; then
+    # there *is* such a branch, so
+    # Move onto the checkpoint branch
+    git symbolic-ref HEAD "refs/heads/$checkpointBranch"
+    git reset
+  else
+    git checkout -b "$checkpointBranch"
+  fi
 
   add_files
 
   git commit -m "Checkpoint at $(date '+%Y-%m-%d %H:%M')" || true
 
-  git push origin "$checkpointBranch"
+  git push "$origin" "$checkpointBranch"
 
   # Now recover the original branch -- this should not change the working tree
   git symbolic-ref HEAD "refs/heads/$currentBranch"
