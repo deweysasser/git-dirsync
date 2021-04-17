@@ -1,0 +1,105 @@
+#!/bin/bash -vx
+
+set -euo pipefail
+shopt -s nullglob
+
+tmp=/tmp/git-dirsync-$$
+trap 'rm -rf $tmp' 0
+mkdir $tmp
+
+not_implemented() {
+  echo "NOT YET IMPLEMENTED"
+  exit 99
+}
+
+# CMD: pull -- pull changes from remote repo
+cmd_pull() {
+  not_implemented
+}
+
+# CMD: checkpoint -- run a temporary checkpoint of local files
+cmd_checkpoint() {
+  pull_changes
+  create_checkpoint_commit
+#  if amend_checkpoint ; then
+#    force_push
+#  else
+#    create_checkpoint
+#    push
+#  fi
+}
+
+# CMD: flush -- flush today's checkpoints into a daily commit
+cmd_flush() {
+  not_implemented
+}
+
+# CMD: help -- print this message
+cmd_help() {
+cat << EOF
+usage: $0 <CMD> [OPTIONS]
+CMD is one of:
+EOF
+
+awk -F : '/^# *CMD: /{print $2}' "$0"
+}
+
+
+# Pull changes from the upstream.
+# If there's a conflict, exit.  If there's no conflict, merge it in and allow git to merge or ff-merge as necessary.
+pull_changes() {
+  git fetch
+  base="$(git merge-base HEAD FETCH_HEAD)"
+  current="$(git rev-parse HEAD)"
+
+    if [ $current != $base ] ; then
+      git merge-tree "$base" HEAD FETCH_HEAD > $tmp/merge-result.txt
+
+    if is_merge_conflict $tmp/merge-result.txt ; then
+      return 1
+    fi
+
+    git merge
+  fi
+}
+
+# check the given file to see if there are merge conflict indicators
+is_merge_conflict() {
+  cat "$1"
+  grep -s "<<" "$1"
+}
+
+# Create a checkpoint commit on the checkpoint branch
+create_checkpoint_commit() {
+  currentCommit=$(git rev-parse HEAD)
+  currentBranch=$(git symbolic-ref --short HEAD)
+  checkpointBranch="checkpoint/$(hostname)"
+
+  # Move onto the checkpoint branch
+  git symbolic-ref HEAD "refs/heads/$checkpointBranch"
+
+  # Look for all the files -- which might have spaces in their names
+  git ls-files -om --exclude-standard | while read file; do
+    git add "$file"
+  done
+
+  git commit -m "Checkpoint at $(date +%Y-%m-%d)"
+
+  # Now recover the original branch -- this should not change the working tree
+  git symbolic-ref HEAD "refs/heads/$currentBranch"
+  git reset "$currentCommit"
+}
+
+main() {
+  if [ -z "${1:-}" ] ; then
+    cmd_help
+    exit 1
+  fi
+
+  cmd="$1"; shift
+
+  eval "cmd_$cmd" "$@"
+}
+
+
+main "$@"
